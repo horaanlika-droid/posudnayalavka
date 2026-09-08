@@ -6,7 +6,7 @@ import express from 'express';
 import { config, paymentMethods, isAdmin, ROOT } from './config.js';
 import { db, save, upsertUser, getUser } from './store.js';
 import { validateInitData } from './lib/telegram-auth.js';
-import { brand, categories, delivery, publicProducts, findProduct } from './catalog.js';
+import { brand, categories, delivery, publicProducts, allProducts, findProduct } from './catalog.js';
 import {
   createOrder, getOrder, userOrders, updateOrder, markPaid,
   normalizeItems, computeTotals, DELIVERY_METHODS, ORDER_STATUSES,
@@ -266,7 +266,13 @@ export function createServer() {
   });
 
   app.get('/health', (req, res) => {
-    res.json({ ok: true, bot: config.telegram.hasBot, orders: db.orders.length, uptime: process.uptime() });
+    res.json({
+      ok: true,
+      bot: config.telegram.hasBot,
+      orders: db.orders.length,
+      catalog: { total: allProducts().length, public: publicProducts().length, categories: categories.length },
+      uptime: process.uptime(),
+    });
   });
 
   // ─── статика Mini App ─────────────────────────────────────────

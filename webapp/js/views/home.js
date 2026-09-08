@@ -35,10 +35,12 @@ function hero() {
   const box = h('.hero',
     h('.hero-slides', ...slides),
     h('.hero-content',
+      h('.hero-brand-badge', h('img', { src: 'assets/brand/logo.png', alt: 'Посудная лавка' })),
       titleEl,
       subEl,
       tap(h('button.hero-cta', h('span', 'Перейти в каталог'), h('span', { html: icon('chevron', 16) })),
-        () => navigate('catalog'))),
+        () => navigate('catalog')),
+      h('.hero-mark')),
     h('.hero-dots', ...dots));
 
   let index = 0;
@@ -53,18 +55,30 @@ function hero() {
   return box;
 }
 
+function brandStrip() {
+  return h('.brand-strip',
+    h('.brand-strip-logo-wrap', h('img.brand-strip-logo', { src: 'assets/brand/logo.png', alt: 'Посудная лавка' })),
+    h('.brand-strip-body',
+      h('.brand-strip-chips',
+        h('.brand-chip', `${state.products.length} позиций`),
+        h('.brand-chip', 'По России и миру')),
+      h('.brand-strip-tagline', state.config?.brand?.tagline || 'Барное стекло для впечатлений гостей')),
+  );
+}
+
 export default function homeView() {
   const hits = state.products.filter((p) => p.isHit).slice(0, 10);
   const news = state.products.filter((p) => p.isNew).slice(0, 10);
   const wine = categoryProducts('wine').slice(0, 10);
   const heroEl = hero();
 
-  const searchBar = tap(h('.searchbar', { style: { margin: '12px 16px 0' } },
+  const searchBar = tap(h('.searchbar.searchbar-home',
     h('span', { html: icon('search', 17) }),
     h('span', { style: { color: 'var(--label-3)', fontSize: '16px' } }, 'Поиск по каталогу')),
   () => navigate('search'));
 
   const content = h('div',
+    brandStrip(),
     searchBar,
     heroEl,
     h('.features', ...FEATURES.map((f) =>
@@ -101,7 +115,8 @@ export default function homeView() {
             state.config?.delivery?.note || '')))),
 
     h('.brand-footer',
-      h('img', { src: 'assets/brand/logo.png', alt: '' }),
+      h('img', { src: 'assets/brand/logo.png', alt: 'Посудная лавка' }),
+      h('p.brand-footer-title', state.config?.brand?.title || 'Посудная лавка'),
       h('p', `${state.products.length} позиций в каталоге · цены августа 2026`),
       h('p', state.config?.brand?.email || '')),
   );
