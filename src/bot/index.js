@@ -8,7 +8,7 @@ import { db, save, upsertUser, userTitle } from '../store.js';
 import { events } from '../events.js';
 import { addUserMessage, addAdminMessage, getThread } from '../support.js';
 import { userOrders } from '../orders.js';
-import { brand } from '../catalog.js';
+import { brand, categories, publicProducts, findProduct } from '../catalog.js';
 import { invoiceSummary } from '../payments/invoice.js';
 import { registerAdmin, statusMessage, adminPending } from './admin.js';
 import { esc, money, orderCard, statusLabel, dateTime } from './format.js';
@@ -17,13 +17,116 @@ let bot = null;
 export const getBot = () => bot;
 
 const appUrl = () => (config.publicUrl?.startsWith('https://') ? config.publicUrl : '');
+const CATALOG_PAGE = 6;
+
+const publicCatalog = () => publicProducts().filter((p) => !p.hidden);
+const productLink = (productId) => (
+  config.telegram.username
+    ? `https://t.me/${config.telegram.username}?startapp=product_${productId}`
+    : appUrl()
+);
+const shopLink = () => (
+  appUrl() || (config.telegram.username ? `https://t.me/${config.telegram.username}?startapp=shop` : '')
+);
 
 function shopKeyboard() {
   const kb = new InlineKeyboard();
   const url = appUrl();
   if (url) kb.webApp('🍸 Открыть магазин', url).row();
   else if (config.telegram.username) kb.url('🍸 Открыть магазин', `https://t.me/${config.telegram.username}?startapp=shop`).row();
+  kb.text('📚 Каталог в чате', 'u:catalog').row();
   kb.text('🚚 Доставка и оплата', 'u:delivery').text('💬 Поддержка', 'u:support');
+  return kb;
+}
+
+function categoryProducts(categoryId = 'all') {
+  const items = publicCatalog();
+  if (!categoryId || categoryId === 'all') return items;
+  return items.filter((p) => p.category === categoryId);
+}
+
+function catalogMenuKeyboard(active = 'all') {
+  const kb = new InlineKeyboard();
+  const allCount = publicCatalog().length;
+  kb.text(active === 'all' ? `• Все (${allCount})` : `Все (${allCount})`, 'u:cat:all:0').row();
+  for (const category of categories) {
+    const count = categoryProducts(category.id).length;
+    kb.text(active === category.id ? `• ${category.title} (${count})` : `${category.title} (${count})`, `u:cat:${category.id}:0`).row();
+  }
+  const link = shopLink();
+  if (link) kb.url('🍸 Открыть Mini App', link).row();
+  kb.text('💬 Поддержка', 'u:support');
+  return kb;
+}
+
+function catalogText(active = 'all') {
+  const title = active === 'all'
+    ? 'Весь каталог'
+    : categories.find((c) => c.id === active)?.title || 'Каталог';
+  const items = categoryProducts(active);
+  return [
+    `<b>${esc(title)}</b>`,
+    '',
+    `Доступно позиций: <b>${items.length}</b>`,
+    'Выберите категорию или откройте Mini App для быстрого заказа, корзины и оплаты.',
+  ].join('\n');
+}
+
+function catalogPage(categoryId = 'all', page = 0) {
+  const items = categoryProducts(categoryId);
+  const pages = Math.max(1, Math.ceil(items.length / CATALOG_PAGE));
+  const currentPage = Math.min(Math.max(Number(page) || 0, 0), pages - 1);
+  const slice = items.slice(currentPage * CATALOG_PAGE, currentPage * CATALOG_PAGE + CATALOG_PAGE);
+  const kb = new InlineKeyboard();
+
+  for (const p of slice) {
+    const state = p.outOfStock ? ' · нет в наличии' : '';
+    kb.text(`${p.name} · ${money(p.price)}${state}`, `u:product:${p.id}:${categoryId}:${currentPage}`).row();
+  }
+  if (pages > 1) {
+    kb.text('‹', `u:cat:${categoryId}:${Math.max(0, currentPage - 1)}`)
+      .text(`${currentPage + 1}/${pages}`, 'u:noop')
+      .text('›', `u:cat:${categoryId}:${Math.min(pages - 1, currentPage + 1)}`)
+      .row();
+  }
+  kb.text('📂 Категории', `u:catalog:${categoryId}`).row();
+  const link = shopLink();
+  if (link) kb.url('🛍 Весь магазин', link).row();
+  kb.text('💬 Поддержка', 'u:support');
+
+  const categoryTitle = categoryId === 'all'
+    ? 'Каталог'
+    : categories.find((c) => c.id === categoryId)?.title || 'Каталог';
+  const from = items.length ? (currentPage * CATALOG_PAGE + 1) : 0;
+  const to = Math.min(items.length, currentPage * CATALOG_PAGE + slice.length);
+  const text = [
+    `<b>${esc(categoryTitle)}</b>`,
+    items.length ? `Позиции ${from}–${to} из ${items.length}` : 'В этой категории пока нет товаров',
+    '',
+    ...slice.map((p, index) => `${from + index}. <b>${esc(p.name)}</b>${p.volumeLabel ? ` · ${esc(p.volumeLabel)}` : ''}\n${money(p.price)}${p.outOfStock ? ' · нет в наличии' : ''}`),
+  ].join('\n');
+
+  return { text, kb };
+}
+
+function productCardText(product) {
+  const category = categories.find((c) => c.id === product.category);
+  return [
+    `<b>${esc(product.name)}</b>`,
+    `Артикул: <code>${esc(product.article)}</code>${category ? ` · ${esc(category.title)}` : ''}`,
+    product.volumeLabel ? `Объём: ${esc(product.volumeLabel)}` : '',
+    '',
+    `Цена: <b>${money(product.price)}</b>${product.outOfStock ? ' · нет в наличии' : ''}`,
+    product.description ? `\n${esc(product.description)}` : '',
+  ].filter(Boolean).join('\n');
+}
+
+function productKeyboard(product, categoryId = 'all', page = 0) {
+  const kb = new InlineKeyboard();
+  const link = productLink(product.id);
+  if (link) kb.url('🛍 Открыть в Mini App', link).row();
+  kb.text('‹ К списку', `u:cat:${categoryId}:${page}`).text('📂 Категории', `u:catalog:${categoryId}`).row();
+  kb.text('💬 Поддержка', 'u:support');
   return kb;
 }
 
@@ -67,7 +170,7 @@ const WELCOME = (name) => [
   '• Оплата картой или счёт для юрлица',
   '• Доставка по России и миру, по Москве и Санкт-Петербургу — бесплатно',
   '',
-  'Нажмите «Открыть магазин», чтобы собрать заказ.',
+  'Можно открыть Mini App или листать каталог прямо в чате.',
 ].join('\n');
 
 const DELIVERY_TEXT = [
@@ -117,10 +220,15 @@ export function createBot() {
     await ctx.reply('Каталог «Посудной лавки»:', { reply_markup: shopKeyboard() });
   });
 
+  bot.command('catalog', async (ctx) => {
+    await ctx.reply(catalogText(), { parse_mode: 'HTML', reply_markup: catalogMenuKeyboard() });
+  });
+
   bot.command('help', async (ctx) => {
     const lines = [
       '<b>Команды</b>',
-      '/shop — открыть каталог',
+      '/shop — открыть магазин',
+      '/catalog — листать каталог в чате',
       '/orders — мои заказы',
       '/support — написать в поддержку',
       '/delivery — доставка и оплата',
@@ -156,9 +264,57 @@ export function createBot() {
     await ctx.reply(DELIVERY_TEXT, { parse_mode: 'HTML' });
   });
 
+  bot.callbackQuery(/^u:catalog(?::(.+))?$/, async (ctx) => {
+    const active = ctx.match?.[1] || 'all';
+    await ctx.answerCallbackQuery();
+    await ctx.editMessageText(catalogText(active), {
+      parse_mode: 'HTML',
+      reply_markup: catalogMenuKeyboard(active),
+      link_preview_options: { is_disabled: true },
+    }).catch(async () => {
+      await ctx.reply(catalogText(active), { parse_mode: 'HTML', reply_markup: catalogMenuKeyboard(active) });
+    });
+  });
+
+  bot.callbackQuery(/^u:cat:([^:]+):(\d+)$/, async (ctx) => {
+    const [, categoryId, page] = ctx.match;
+    const { text, kb } = catalogPage(categoryId, Number(page));
+    await ctx.answerCallbackQuery();
+    await ctx.editMessageText(text, {
+      parse_mode: 'HTML',
+      reply_markup: kb,
+      link_preview_options: { is_disabled: true },
+    }).catch(async () => {
+      await ctx.reply(text, { parse_mode: 'HTML', reply_markup: kb });
+    });
+  });
+
+  bot.callbackQuery(/^u:product:([^:]+):([^:]+):(\d+)$/, async (ctx) => {
+    const [, productId, categoryId, page] = ctx.match;
+    const product = findProduct(productId);
+    await ctx.answerCallbackQuery();
+    if (!product || product.hidden) {
+      return ctx.reply('Товар не найден');
+    }
+    await ctx.editMessageText(productCardText(product), {
+      parse_mode: 'HTML',
+      reply_markup: productKeyboard(product, categoryId, Number(page)),
+      link_preview_options: { is_disabled: true },
+    }).catch(async () => {
+      await ctx.reply(productCardText(product), {
+        parse_mode: 'HTML',
+        reply_markup: productKeyboard(product, categoryId, Number(page)),
+      });
+    });
+  });
+
   bot.callbackQuery('u:support', async (ctx) => {
     await ctx.answerCallbackQuery();
     await ctx.reply('Напишите ваш вопрос сообщением — менеджер ответит здесь же и в приложении.');
+  });
+
+  bot.callbackQuery('u:noop', async (ctx) => {
+    await ctx.answerCallbackQuery();
   });
 
   // ─── текстовые сообщения ──────────────────────────────────────
@@ -264,7 +420,8 @@ export async function startBot() {
   if (!instance) return null;
 
   await instance.api.setMyCommands([
-    { command: 'shop', description: 'Каталог' },
+    { command: 'shop', description: 'Открыть магазин' },
+    { command: 'catalog', description: 'Каталог в чате' },
     { command: 'orders', description: 'Мои заказы' },
     { command: 'support', description: 'Поддержка' },
     { command: 'delivery', description: 'Доставка и оплата' },
@@ -282,9 +439,12 @@ export async function startBot() {
 
   const me = await instance.api.getMe();
   if (!config.telegram.username) config.telegram.username = me.username;
-  console.log(`[bot] запущен как @${me.username}, админов: ${config.telegram.adminIds.length}`);
+  console.log(`[bot] запущен как @${me.username}, админов: ${config.telegram.adminIds.length}, каталог: ${publicCatalog().length} позиций`);
   if (!config.telegram.adminIds.length) {
     console.warn('[bot] ADMIN_IDS пуст — админ-панель и уведомления недоступны');
+  }
+  if (!publicCatalog().length) {
+    console.warn('[bot] каталог пуст — проверьте наличие файла data/catalog.json в деплое');
   }
 
   instance.start({

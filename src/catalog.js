@@ -12,6 +12,7 @@ const FILE = path.join(ROOT, 'data', 'catalog.json');
 let base = { brand: {}, categories: [], products: [], delivery: {} };
 try {
   base = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+  console.log(`[catalog] загружено ${base.products?.length || 0} товаров из data/catalog.json`);
 } catch (err) {
   console.error('[catalog] не удалось прочитать data/catalog.json:', err.message);
 }
