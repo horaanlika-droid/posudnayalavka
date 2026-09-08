@@ -1,24 +1,8 @@
-# deps
 node_modules/
-
-# next
-.next/
-out/
-next-env.d.ts
-
-# runtime data & uploads
-data/*.json
-data/*.json.tmp
-data/*.lock
-
-# env secrets (user fills in on host)
 .env
 .env.local
-.env.*.local
-
-# logs & os
+data/db.json
+data/db.json.tmp
+data/backups/
 *.log
-npm-debug.log*
 .DS_Store
-tsbuildinfo
-*.tsbuildinfo
