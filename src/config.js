@@ -47,13 +47,44 @@ const adminIds = str('ADMIN_IDS')
   .map(Number)
   .filter((x) => Number.isFinite(x) && x > 0);
 
-const publicUrl = str('PUBLIC_URL').replace(/\/+$/, '');
+/**
+ * Публичный HTTPS-адрес приложения. Если PUBLIC_URL не задан, берём домен,
+ * который хостинг (BotHost) сам прокидывает в контейнер переменной DOMAIN /
+ * BOTHOST_DOMAIN, — тогда кнопка Mini App и ссылки на счета работают сразу
+ * после привязки домена в панели, без ручного дублирования.
+ */
+function detectPublicUrl() {
+  let url = str('PUBLIC_URL');
+  if (!url) {
+    url = str('DOMAIN') || str('BOTHOST_DOMAIN') || str('BOT_DOMAIN');
+    if (url && !/^https?:\/\//i.test(url)) url = `https://${url}`;
+  }
+  return url.replace(/\/+$/, '');
+}
+
+const publicUrl = detectPublicUrl();
 
 export const config = {
   root: ROOT,
   mode: (str('MODE', 'all') || 'all').toLowerCase(), // all | web | bot
   port: num('PORT', 3000),
   host: str('HOST', '0.0.0.0'),
+  /**
+   * Все порты, на которых веб-сервер слушает одновременно. Кроме основного
+   * PORT добавляем типичные порты, которые хостинги прописывают в настройках
+   * домена (3000 и 8080 на BotHost), — reverse-proxy достучится до приложения
+   * независимо от того, какой порт указан в панели, и 502 Bad Gateway из-за
+   * «в панели один порт, в приложении другой» становится невозможен.
+   * Свой набор: EXTRA_PORTS=8080,9000.
+   */
+  webPorts: (() => {
+    const main = num('PORT', 3000);
+    const extra = str('EXTRA_PORTS', '3000,8080')
+      .split(/[,;\s]+/)
+      .map((x) => Number.parseInt(x, 10))
+      .filter((p) => Number.isInteger(p) && p > 0 && p < 65536);
+    return [...new Set([main, ...extra])];
+  })(),
   publicUrl,
 
   telegram: {

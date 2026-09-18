@@ -341,13 +341,41 @@ export function createServer() {
   return app;
 }
 
+/** Поднять одно приложение сразу на нескольких портах (см. config.webPorts). */
 export function startServer() {
   const app = createServer();
-  return new Promise((resolve) => {
-    const server = app.listen(config.port, config.host, () => {
-      console.log(`[web] Mini App на http://${config.host}:${config.port}`);
-      if (!config.publicUrl) console.log('[web] PUBLIC_URL не задан — ссылки на счета будут относительными');
-      resolve(server);
+
+  const listen = (port) => new Promise((resolve, reject) => {
+    const server = app.listen(port, config.host);
+    server.once('listening', () => resolve(server));
+    server.once('error', (err) => {
+      if (err && err.code === 'EADDRINUSE') return resolve(null); // порт занят другим процессом — пропускаем
+      reject(err);
     });
   });
+
+  return (async () => {
+    const bound = [];
+    let lastError = null;
+    for (const port of config.webPorts) {
+      try {
+        const server = await listen(port);
+        if (server) bound.push(server.address().port);
+        else console.warn(`[web] порт ${port} уже занят другим процессом — пропускаю`);
+      } catch (err) {
+        lastError = err;
+        console.error(`[web] не удалось слушать порт ${port}:`, err.message);
+      }
+    }
+    if (!bound.length) {
+      throw lastError || new Error(`веб-сервер не поднялся ни на одном порте из ${config.webPorts.join(', ')}`);
+    }
+    console.log(`[web] Mini App на ${bound.map((p) => `http://${config.host}:${p}`).join(', ')}`);
+    if (config.publicUrl) console.log(`[web] адрес приложения (PUBLIC_URL/DOMAIN): ${config.publicUrl}`);
+    else console.log('[web] PUBLIC_URL не задан — ссылки на счета будут относительными; задайте его в панели хостинга');
+    if (bound.length > 1 || bound[0] !== config.port) {
+      console.log(`[web] в настройках домена BotHost укажите любой из этих портов: ${bound.join(', ')}`);
+    }
+    return app;
+  })();
 }
