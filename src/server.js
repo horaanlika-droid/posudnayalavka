@@ -4,14 +4,24 @@
 import path from 'node:path';
 import express from 'express';
 import { config, paymentMethods, isAdmin, ROOT } from './config.js';
-import { db, save, upsertUser, getUser } from './store.js';
+import { db, save, upsertUser, getUser, userTitle } from './store.js';
 import { validateInitData } from './lib/telegram-auth.js';
-import { brand, categories, delivery, publicProducts, allProducts, findProduct } from './catalog.js';
 import {
-  createOrder, getOrder, userOrders, updateOrder, markPaid,
-  normalizeItems, computeTotals, DELIVERY_METHODS, ORDER_STATUSES,
+  publicProducts, allProducts, findProduct, getCategories,
+  getBrand, getDeliveryInfo, getShopSettings, getTexts,
+  createProduct, updateProduct, deleteProduct, restoreProduct,
+  createCategory, updateCategory, deleteCategory,
+  getShopInfo, updateShopInfo, catalogStats,
+  parsePhotoDataUrl, saveProductPhoto,
+} from './catalog.js';
+import {
+  createOrder, getOrder, getOrderByNumber, userOrders, updateOrder, markPaid, setStatus,
+  normalizeItems, computeTotals, DELIVERY_METHODS, ORDER_STATUSES, orderStats,
 } from './orders.js';
-import { addUserMessage, getThread, markUserRead } from './support.js';
+import {
+  addUserMessage, addAdminMessage, getThread, markUserRead, markAdminRead,
+  listThreads, supportStats,
+} from './support.js';
 import { renderInvoiceHtml, invoiceSummary } from './payments/invoice.js';
 import * as yookassa from './payments/yookassa.js';
 
@@ -21,7 +31,7 @@ export function createServer() {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', true);
-  app.use(express.json({ limit: '256kb' }));
+  app.use(express.json({ limit: '8mb' }));
 
   // ─── авторизация через Telegram initData ──────────────────────
   function authenticate(req, res, next) {
@@ -41,7 +51,8 @@ export function createServer() {
       // Режим разработки/превью: приложение открывается в обычном браузере.
       const devId = Number(req.get('X-Dev-User') || 1);
       req.user = upsertUser({ id: devId, first_name: 'Гость', username: 'preview' });
-      req.isAdmin = isAdmin(devId);
+      // в превью без настроенных админов гость видит и админ-панель (для проверки)
+      req.isAdmin = isAdmin(devId) || config.telegram.adminIds.length === 0;
       req.devMode = true;
       return next();
     }
@@ -60,14 +71,17 @@ export function createServer() {
 
   // ─── конфигурация витрины ─────────────────────────────────────
   api.get('/config', wrap((req, res) => {
+    const shop = getShopSettings();
     res.json({
-      brand,
+      brand: getBrand(),
       delivery: {
-        ...delivery,
+        ...getDeliveryInfo(),
         methods: Object.entries(DELIVERY_METHODS).map(([id, m]) => ({ id, ...m })),
-        freeFrom: config.shop.freeShippingFrom,
-        cost: config.shop.shippingCost,
+        freeFrom: shop.freeShippingFrom,
+        cost: shop.shippingCost,
       },
+      shop,
+      texts: getTexts(),
       payments: paymentMethods(),
       statuses: ORDER_STATUSES,
       user: req.user,
@@ -79,7 +93,7 @@ export function createServer() {
   }));
 
   api.get('/catalog', wrap((req, res) => {
-    res.json({ categories, products: publicProducts() });
+    res.json({ categories: getCategories(), products: publicProducts() });
   }));
 
   // ─── избранное ────────────────────────────────────────────────
@@ -234,6 +248,177 @@ export function createServer() {
     res.json({ messages, now: Date.now() });
   }));
 
+  // ─── админ-панель (веб + бот используют одни и те же данные) ──
+  const admin = express.Router();
+  admin.use((req, res, next) => {
+    if (!req.isAdmin) return res.status(403).json({ error: 'Недостаточно прав' });
+    return next();
+  });
+
+  admin.get('/stats', wrap((req, res) => {
+    const s = orderStats();
+    const top = {};
+    for (const o of db.orders) {
+      if (o.paymentStatus !== 'paid') continue;
+      for (const it of o.items) top[it.name] = (top[it.name] || 0) + it.qty;
+    }
+    res.json({
+      orders: s,
+      catalog: catalogStats(),
+      support: supportStats(),
+      bestsellers: Object.entries(top).sort((a, b) => b[1] - a[1]).slice(0, 8)
+        .map(([name, qty]) => ({ name, qty })),
+    });
+  }));
+
+  // товары
+  admin.get('/products', wrap((req, res) => {
+    const q = String(req.query.q || '').trim().toLowerCase();
+    const filter = String(req.query.filter || 'all');
+    let list = allProducts();
+    if (filter === 'hidden') list = list.filter((p) => p.hidden);
+    else if (filter === 'oos') list = list.filter((p) => p.outOfStock);
+    else if (filter === 'custom') list = list.filter((p) => p.custom);
+    else if (filter === 'edited') list = list.filter((p) => p.price !== p.basePrice);
+    if (q) {
+      list = list.filter((p) =>
+        `${p.name} ${p.article} ${p.id} ${p.volumeLabel || ''}`.toLowerCase().includes(q));
+    }
+    res.json({ products: list, categories: getCategories() });
+  }));
+
+  admin.post('/products', wrap((req, res) => {
+    const body = req.body || {};
+    const product = createProduct(body);
+    if (body.photoData) {
+      const { buffer, ext } = parsePhotoDataUrl(body.photoData);
+      const image = saveProductPhoto(product.id, buffer, ext);
+      updateProduct(product.id, { image });
+    }
+    res.json({ product: findProduct(product.id) });
+  }));
+
+  admin.put('/products/:id', wrap((req, res) => {
+    const body = req.body || {};
+    let product = updateProduct(req.params.id, body);
+    if (body.photoData) {
+      const { buffer, ext } = parsePhotoDataUrl(body.photoData);
+      const image = saveProductPhoto(product.id, buffer, ext);
+      product = updateProduct(product.id, { image });
+    }
+    res.json({ product });
+  }));
+
+  admin.delete('/products/:id', wrap((req, res) => {
+    res.json(deleteProduct(req.params.id));
+  }));
+
+  admin.post('/products/:id/restore', wrap((req, res) => {
+    res.json({ product: restoreProduct(req.params.id) });
+  }));
+
+  // категории
+  admin.get('/categories', wrap((req, res) => {
+    const counts = {};
+    for (const p of allProducts()) counts[p.category] = (counts[p.category] || 0) + 1;
+    res.json({
+      categories: getCategories().map((c) => ({ ...c, products: counts[c.id] || 0 })),
+    });
+  }));
+
+  admin.post('/categories', wrap((req, res) => {
+    res.json({ category: createCategory(req.body || {}) });
+  }));
+
+  admin.put('/categories/:id', wrap((req, res) => {
+    res.json({ category: updateCategory(req.params.id, req.body || {}) });
+  }));
+
+  admin.delete('/categories/:id', wrap((req, res) => {
+    deleteCategory(req.params.id);
+    res.json({ ok: true });
+  }));
+
+  // информация о магазине: бренд, контакты, доставка, реквизиты, тексты
+  admin.get('/shop-info', wrap((req, res) => {
+    res.json(getShopInfo());
+  }));
+
+  admin.put('/shop-info', wrap((req, res) => {
+    res.json(updateShopInfo(req.body || {}));
+  }));
+
+  // заказы
+  admin.get('/orders', wrap((req, res) => {
+    const q = String(req.query.q || '').trim().toLowerCase();
+    const filter = String(req.query.filter || 'all');
+    let orders = db.orders;
+    if (filter === 'open') orders = orders.filter((o) => !['done', 'canceled'].includes(o.status));
+    else if (filter === 'paid') orders = orders.filter((o) => o.paymentStatus === 'paid');
+    else if (filter === 'invoice') orders = orders.filter((o) => o.paymentMethod === 'invoice');
+    if (q) {
+      orders = orders.filter((o) =>
+        `${o.number} ${o.id} ${o.customer?.name || ''} ${o.customer?.phone || ''} ${o.company?.name || ''} ${o.company?.inn || ''}`
+          .toLowerCase().includes(q));
+    }
+    res.json({
+      orders: orders.slice(0, 200).map((o) => ({
+        ...o,
+        userTitle: userTitle(o.userId),
+        username: getUser(o.userId)?.username || '',
+      })),
+      total: orders.length,
+    });
+  }));
+
+  admin.put('/orders/:id', wrap((req, res) => {
+    const order = getOrder(req.params.id);
+    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
+    const status = String(req.body?.status || '');
+    if (!ORDER_STATUSES[status]) throw new Error('Неизвестный статус');
+    setStatus(order, status, `admin:${req.user.id}`);
+    res.json({ order });
+  }));
+
+  // поддержка
+  admin.get('/threads', wrap((req, res) => {
+    res.json({
+      threads: listThreads().map((t) => ({
+        userId: t.userId,
+        title: t.title,
+        username: getUser(t.userId)?.username || '',
+        unreadAdmin: t.unreadAdmin,
+        status: t.status,
+        updatedAt: t.updatedAt,
+        lastMessage: t.lastMessage,
+        messagesCount: t.messages.length,
+      })),
+    });
+  }));
+
+  admin.get('/threads/:userId', wrap((req, res) => {
+    const thread = getThread(req.params.userId, false);
+    if (!thread) return res.status(404).json({ error: 'Диалог не найден' });
+    markAdminRead(req.params.userId);
+    res.json({
+      thread: {
+        ...thread,
+        title: userTitle(req.params.userId),
+        username: getUser(req.params.userId)?.username || '',
+      },
+    });
+  }));
+
+  admin.post('/threads/:userId/reply', wrap((req, res) => {
+    const text = String(req.body?.text || '').trim();
+    if (!text) throw new Error('Пустое сообщение');
+    const name = [req.user.firstName, req.user.lastName].filter(Boolean).join(' ') || 'Поддержка';
+    const message = addAdminMessage(req.params.userId, text, { name });
+    res.json({ message });
+  }));
+
+  api.use('/admin', admin);
+
   app.use('/api', api);
 
   // ─── вебхук ЮKassa ────────────────────────────────────────────
@@ -270,7 +455,7 @@ export function createServer() {
       ok: true,
       bot: config.telegram.hasBot,
       orders: db.orders.length,
-      catalog: { total: allProducts().length, public: publicProducts().length, categories: categories.length },
+      catalog: { total: allProducts().length, public: publicProducts().length, categories: getCategories().length },
       uptime: process.uptime(),
     });
   });

@@ -60,7 +60,7 @@ export default function productView({ id }) {
 
   const content = h('div',
     h('.product-hero',
-      p.image ? h('img', { src: p.image, alt: p.name }) : null,
+      p.image ? h('img', { src: p.image, alt: p.name }) : h('.product-noimg', '🍸'),
       p.isNew ? h('.badge.new', { style: { top: '16px', left: '16px' } }, 'Новинка')
         : p.isHit ? h('.badge', { style: { top: '16px', left: '16px' } }, 'Хит') : null),
 

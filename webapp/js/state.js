@@ -184,3 +184,17 @@ export function updateOrdersCache(orders) {
   state.orders = orders;
   notify('orders');
 }
+
+/** Перезагрузить каталог, категории и настройки (после правок в админке). */
+export async function refreshCatalog() {
+  const [config, catalog] = await Promise.all([api.config(), api.catalog()]);
+  state.config = config;
+  state.categories = catalog.categories;
+  state.products = catalog.products;
+  state.productsById = new Map(catalog.products.map((p) => [p.id, p]));
+  for (const id of [...state.cart.keys()]) {
+    if (!state.productsById.has(id)) state.cart.delete(id);
+  }
+  notify('catalog');
+  return state;
+}

@@ -2,9 +2,8 @@
  * Заказы: расчёт сумм, создание, статусы.
  */
 import crypto from 'node:crypto';
-import { config } from './config.js';
 import { db, save, nextId, getUser } from './store.js';
-import { findProduct } from './catalog.js';
+import { findProduct, getShopSettings } from './catalog.js';
 import { events } from './events.js';
 import { nextInvoiceNumber } from './payments/invoice.js';
 
@@ -28,8 +27,9 @@ export const DELIVERY_METHODS = {
 export function shippingCost(subtotal, method) {
   const m = DELIVERY_METHODS[method];
   if (!m || m.free) return 0;
-  if (subtotal >= config.shop.freeShippingFrom) return 0;
-  return config.shop.shippingCost;
+  const shop = getShopSettings();
+  if (subtotal >= shop.freeShippingFrom) return 0;
+  return shop.shippingCost;
 }
 
 /** Пересчитывает корзину по актуальным ценам каталога. */
@@ -63,8 +63,9 @@ export function createOrder({ userId, items, customer, delivery, paymentMethod, 
   const normalized = normalizeItems(items);
   if (!normalized.length) throw new Error('Корзина пуста');
   const { subtotal, shipping, total } = computeTotals(normalized, delivery?.method);
-  if (config.shop.minOrderTotal && total < config.shop.minOrderTotal) {
-    throw new Error(`Минимальная сумма заказа — ${config.shop.minOrderTotal} ₽`);
+  const minOrderTotal = getShopSettings().minOrderTotal;
+  if (minOrderTotal && total < minOrderTotal) {
+    throw new Error(`Минимальная сумма заказа — ${minOrderTotal} ₽`);
   }
 
   const seq = nextId('order');
