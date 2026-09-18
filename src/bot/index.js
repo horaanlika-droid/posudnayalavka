@@ -448,7 +448,7 @@ export async function startBot() {
     console.warn('[bot] ADMIN_IDS пуст — админ-панель и уведомления недоступны');
   }
   if (!publicCatalog().length) {
-    console.warn('[bot] каталог пуст — проверьте наличие файла data/catalog.json в деплое');
+    console.warn('[bot] каталог пуст — проверьте data/catalog.json; вернуть позиции: /admin → Каталог → «Вернуть всё из прайса»');
   }
 
   instance.start({

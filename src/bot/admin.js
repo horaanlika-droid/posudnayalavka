@@ -14,7 +14,8 @@ import {
 } from '../support.js';
 import {
   searchProducts, findProduct, setOverride, catalogStats, categoryTitle,
-  createProduct, updateProduct, deleteProduct,
+  createProduct, updateProduct, deleteProduct, restoreProduct,
+  deletedBaseProducts, restoreBaseCatalog, catalogHealth,
   getCategories, findCategory, createCategory, updateCategory, deleteCategory,
   getShopInfo, updateShopInfo,
   saveProductPhoto, getBrand, getDeliveryInfo, getShopSettings, getSeller, getTexts,
@@ -180,18 +181,22 @@ function catalogMenu() {
     .text('➕ Добавить товар', 'a:npnew').row()
     .text('🔍 Найти товар', 'a:findproduct').row()
     .text('🚫 Скрытые', 'a:list:hidden').text('📭 Нет в наличии', 'a:list:oos').row()
-    .text('✏️ Изменённые цены', 'a:list:edited').text('🗂 Категории', 'a:cats').row()
-    .text('‹ Меню', 'a:menu');
+    .text('✏️ Изменённые цены', 'a:list:edited').text('🗂 Категории', 'a:cats').row();
+  if (s.deleted) kb.text(`🗑 Удалённые (${s.deleted})`, 'a:list:deleted').row();
+  kb.text('↩️ Вернуть всё из прайса', 'a:restoreall').row();
+  kb.text('‹ Меню', 'a:menu');
   const text = [
     '<b>Каталог</b>',
     '',
     `Позиций: <b>${s.total}</b> (своих: ${s.custom}, категорий: ${s.categories})`,
     `Скрыто: ${s.hidden} · нет в наличии: ${s.outOfStock}`,
     `С ручными правками: ${s.edited}`,
+    s.deleted ? `⚠️ Удалено из каталога: <b>${s.deleted}</b> (в прайсе ${s.baseTotal} поз.)` : '',
     '',
     'Найдите товар, чтобы изменить любое поле, фото или наличие.',
     'Новый товар добавляется пошагово — с фото и описанием.',
-  ].join('\n');
+    'Если позиции пропали из витрины — «Вернуть всё из прайса».',
+  ].filter(Boolean).join('\n');
   return { text, kb };
 }
 
@@ -234,6 +239,22 @@ function isBasePrice(p) {
 }
 
 function productList(kind) {
+  if (kind === 'deleted') {
+    const items = deletedBaseProducts();
+    const kb = new InlineKeyboard();
+    for (const p of items.slice(0, 20)) {
+      kb.text(`↩️ ${p.name} · ${money(p.price)}`.slice(0, 60), `a:dproduct:${p.id}`).row();
+    }
+    if (items.length) kb.text('↩️ Вернуть все позиции', 'a:restoreall').row();
+    kb.text('‹ Каталог', 'a:catalog');
+    return {
+      text: items.length
+        ? '<b>Удалённые из каталога</b>\nЭти позиции есть в прайсе — их можно вернуть:\n\n' +
+          items.map((p) => `• ${esc(p.name)}${p.volumeLabel ? ` · ${esc(p.volumeLabel)}` : ''}`).join('\n')
+        : '<b>Удалённые из каталога</b>\nСписок пуст — все позиции прайса на месте',
+      kb,
+    };
+  }
   const all = searchProducts('', { includeHidden: true });
   const filtered =
     kind === 'hidden' ? all.filter((p) => p.hidden)
@@ -249,6 +270,24 @@ function productList(kind) {
     text: filtered.length ? `<b>${titles[kind]}</b> · ${filtered.length}` : `<b>${titles[kind]}</b>\nСписок пуст`,
     kb,
   };
+}
+
+/** Карточка удалённой позиции из прайса — с кнопкой возврата. */
+function deletedProductCard(id) {
+  const p = deletedBaseProducts().find((x) => String(x.id) === String(id));
+  if (!p) return { text: 'Позиция не найдена', kb: new InlineKeyboard().text('‹ Удалённые', 'a:list:deleted') };
+  const text = [
+    `<b>${esc(p.name)}</b>`,
+    `Артикул: <code>${esc(p.article)}</code> · ${esc(categoryTitle(p.category))}`,
+    p.volumeLabel ? `Объём: ${esc(p.volumeLabel)}` : '',
+    `Цена: <b>${money(p.price)}</b>`,
+    '',
+    'Позиция удалена из каталога, но есть в прайсе.',
+  ].filter(Boolean).join('\n');
+  const kb = new InlineKeyboard()
+    .text('↩️ Вернуть в каталог', `a:restore:${p.id}`).row()
+    .text('‹ Удалённые', 'a:list:deleted').text('Меню', 'a:menu');
+  return { text, kb };
 }
 
 // ─── мастер создания товара ────────────────────────────────────
@@ -642,6 +681,46 @@ export function registerAdmin(bot, { notifyUser }) {
         const { text, kb } = productList(arg1);
         return edit(ctx, text, kb);
       }
+      case 'dproduct': {
+        const { text, kb } = deletedProductCard(arg1);
+        return edit(ctx, text, kb);
+      }
+      case 'restore': {
+        let p = null;
+        try {
+          p = restoreProduct(arg1);
+        } catch (err) {
+          return ctx.reply(`❌ ${esc(err.message)}`);
+        }
+        const { text, kb } = catalogMenu();
+        await ctx.reply(`↩️ ${p ? `«${esc(p.name)}» снова на витрине` : 'Позиция возвращена в каталог'}\n\nВсего видно: ${catalogHealth().visible}`);
+        return edit(ctx, text, kb);
+      }
+      case 'restoreall': {
+        const s = catalogStats();
+        const lines = [
+          '<b>Вернуть позиции из прайса</b>',
+          '',
+          `В прайсе: ${s.baseTotal} поз. · на витрине: ${s.visible}`,
+          s.deleted ? `Удалено из каталога: <b>${s.deleted}</b>` : 'Удалённых нет',
+          s.hidden ? `Скрыто вручную: <b>${s.hidden}</b>` : '',
+          '',
+          'Верну все позиции прайса и сниму ручное скрытие.',
+          'Свои товары, цены, описания и фото останутся как есть.',
+        ].filter(Boolean);
+        return edit(ctx, lines.join('\n'),
+          new InlineKeyboard().text('↩️ Да, вернуть', 'a:restoreallgo').text('Отмена', 'a:catalog'));
+      }
+      case 'restoreallgo': {
+        const res = restoreBaseCatalog();
+        const { text, kb } = catalogMenu();
+        await ctx.reply(
+          `↩️ Вернул из прайса позиций: ${res.restored}` +
+          `${res.unhidden ? `\n👁 Снял скрытие: ${res.unhidden}` : ''}` +
+          `\n\nСейчас на витрине: ${res.visible}`,
+        );
+        return edit(ctx, text, kb);
+      }
       case 'product': {
         const { text, kb } = productCard(arg1);
         return edit(ctx, text, kb);
@@ -720,7 +799,7 @@ export function registerAdmin(bot, { notifyUser }) {
       case 'del': {
         const p = findProduct(arg1);
         return edit(ctx,
-          `Удалить товар «<b>${esc(p?.name || '')}</b>»?\nЭто действие нельзя отменить.`,
+          `Удалить товар «<b>${esc(p?.name || '')}</b>»?\nОн исчезнет с витрины. Вернуть можно в «Каталог → 🗑 Удалённые».`,
           new InlineKeyboard().text('🗑 Да, удалить', `a:delgo:${arg1}`).text('Отмена', `a:product:${arg1}`));
       }
       case 'delgo': {
@@ -730,7 +809,7 @@ export function registerAdmin(bot, { notifyUser }) {
           return ctx.reply(`❌ ${esc(err.message)}`);
         }
         const { text, kb } = catalogMenu();
-        await ctx.reply('🗑 Товар удалён');
+        await ctx.reply('🗑 Товар убран с витрины. Вернуть: Каталог → 🗑 Удалённые');
         return edit(ctx, text, kb);
       }
       // ── новый товар ──
