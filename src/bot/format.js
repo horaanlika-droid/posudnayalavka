@@ -2,7 +2,7 @@
  * Вспомогательные функции форматирования для бота.
  */
 import { ORDER_STATUSES } from '../orders.js';
-import { userTitle } from '../store.js';
+import { userTitle, getUser } from '../store.js';
 
 export const esc = (s) =>
   String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
@@ -61,7 +61,7 @@ export function orderCard(order) {
     '',
     `<b>Клиент:</b> ${esc(order.customer.name)} · ${esc(order.customer.phone)}`,
     order.customer.email ? `E-mail: ${esc(order.customer.email)}` : '',
-    `Telegram: ${esc(userTitle(order.userId))} (<code>${order.userId}</code>)`,
+    `<b>Покупатель:</b> ${esc(userTitle(order.userId))}${getUser(order.userId)?.isGuest ? '' : ` · Telegram <code>${order.userId}</code>`}`,
     `<b>Доставка:</b> ${esc(order.delivery.methodTitle)}${order.delivery.city ? `, ${esc(order.delivery.city)}` : ''}`,
     order.delivery.address ? `Адрес: ${esc(order.delivery.address)}` : '',
     `<b>Оплата:</b> ${esc(paymentLabel(order))}`,

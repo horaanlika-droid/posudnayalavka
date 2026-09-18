@@ -1,6 +1,5 @@
 /** Кабинет: профиль, заказы, поддержка, информация о бренде. */
 import { h, tap, section, cell, group, money, sheet } from '../ui.js';
-import { icon } from '../icons.js';
 import { navigate } from '../router.js';
 import { tg } from '../tg.js';
 import { state, favoriteProducts, cartCount } from '../state.js';
@@ -29,16 +28,13 @@ export default function profileView() {
   const freeCities = (state.config?.delivery?.freeCities || []).join(' и ') || 'Москва и Санкт-Петербург';
 
   const content = h('div',
-    state.config?.isAdmin
-      ? section('Управление', group(
-        cell({ title: 'Админ-панель', sub: 'Товары, заказы, контакты', iconName: 'gear', chevron: true, onClick: () => navigate('admin') }),
-      ))
-      : null,
     h('.profile-head',
       h('.avatar', user.photoUrl ? h('img', { src: user.photoUrl, alt: '' }) : initials),
       h('div',
         h('.profile-name', [user.firstName, user.lastName].filter(Boolean).join(' ') || 'Гость'),
-        h('.profile-sub', user.username ? `@${user.username}` : 'Добро пожаловать в «Посудную лавку»'))),
+        h('.profile-sub', user.username
+          ? `@${user.username}`
+          : (state.config?.guest ? 'Гостевой вход · без регистрации' : 'Добро пожаловать в «Посудную лавку»')))),
 
     h('.stat-grid',
       h('.stat', ordersCountEl, h('span', 'заказов')),
@@ -97,10 +93,6 @@ export default function profileView() {
       cell({ title: 'Все товары', sub: `${state.products.length} позиций`, iconName: 'grid', chevron: true, onClick: () => navigate('catalog', {}, { replaceStack: true, tab: 'catalog' }) }),
       cell({ title: 'Новинки', iconName: 'star', chevron: true, onClick: () => navigate('catalog', { category: 'all' }) }),
     )),
-
-    state.config?.devMode
-      ? h('.notice.warn', 'Режим предпросмотра: вход без Telegram. На проде задайте BOT_TOKEN и уберите ALLOW_DEV_AUTH.')
-      : null,
 
     h('.brand-footer',
       h('img', { src: 'assets/brand/logo.png', alt: '' }),

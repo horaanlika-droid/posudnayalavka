@@ -1,27 +1,21 @@
 /**
- * HTTP-сервер: раздаёт Mini App и обслуживает API.
+ * HTTP-сервер: раздаёт витрину и обслуживает API.
  */
+import crypto from 'node:crypto';
 import path from 'node:path';
 import express from 'express';
-import { config, paymentMethods, isAdmin, ROOT } from './config.js';
-import { db, save, upsertUser, getUser, userTitle } from './store.js';
+import { config, paymentMethods, ROOT } from './config.js';
+import { db, save, upsertUser, getUser } from './store.js';
 import { validateInitData } from './lib/telegram-auth.js';
 import {
   publicProducts, allProducts, findProduct, getCategories,
   getBrand, getDeliveryInfo, getShopSettings, getTexts,
-  createProduct, updateProduct, deleteProduct, restoreProduct,
-  createCategory, updateCategory, deleteCategory,
-  getShopInfo, updateShopInfo, catalogStats,
-  parsePhotoDataUrl, saveProductPhoto,
 } from './catalog.js';
 import {
-  createOrder, getOrder, getOrderByNumber, userOrders, updateOrder, markPaid, setStatus,
-  normalizeItems, computeTotals, DELIVERY_METHODS, ORDER_STATUSES, orderStats,
+  createOrder, getOrder, userOrders, updateOrder, markPaid,
+  normalizeItems, computeTotals, DELIVERY_METHODS, ORDER_STATUSES,
 } from './orders.js';
-import {
-  addUserMessage, addAdminMessage, getThread, markUserRead, markAdminRead,
-  listThreads, supportStats,
-} from './support.js';
+import { addUserMessage, getThread, markUserRead } from './support.js';
 import { renderInvoiceHtml, invoiceSummary } from './payments/invoice.js';
 import * as yookassa from './payments/yookassa.js';
 
@@ -33,30 +27,72 @@ export function createServer() {
   app.set('trust proxy', true);
   app.use(express.json({ limit: '8mb' }));
 
-  // ─── авторизация через Telegram initData ──────────────────────
+  // ─── авторизация ─────────────────────────────────────────────
+  // В Telegram проверяется подпись initData. В обычном браузере магазин
+  // открывается без авторизации: посетитель получает гостевой профиль,
+  // привязанный к подписанной cookie (корзина, избранное и заказы сохраняются).
+  const GUEST_COOKIE = 'pl_guest';
+  const GUEST_COOKIE_MAX_AGE = 365 * 24 * 3600 * 1000; // год
+
+  function guestSecret() {
+    if (!db.settings.guestSecret) {
+      db.settings.guestSecret = crypto.randomBytes(24).toString('hex');
+      save();
+    }
+    return db.settings.guestSecret;
+  }
+
+  function signGuestId(id) {
+    return crypto.createHmac('sha256', guestSecret()).update(`guest:${id}`).digest('base64url');
+  }
+
+  /** Достаёт проверенный гостевой ID из cookie, 0 — если её нет или подпись неверна. */
+  function readGuestCookie(req) {
+    for (const part of (req.get('cookie') || '').split(';')) {
+      const i = part.indexOf('=');
+      if (i === -1 || part.slice(0, i).trim() !== GUEST_COOKIE) continue;
+      const m = part.slice(i + 1).trim().match(/^(-\d+)\.([A-Za-z0-9_-]{1,64})$/);
+      if (!m) return 0;
+      const id = Number(m[1]);
+      const sig = Buffer.from(m[2]);
+      const calc = Buffer.from(signGuestId(id));
+      if (sig.length === calc.length && crypto.timingSafeEqual(sig, calc)) return id;
+      return 0;
+    }
+    return 0;
+  }
+
   function authenticate(req, res, next) {
+    // 1) Mini App в Telegram — проверяем подпись initData
     const initData = req.get('X-Telegram-Init-Data') || '';
     if (initData && config.telegram.token) {
       const result = validateInitData(initData, config.telegram.token);
       if (result.ok) {
         req.user = upsertUser(result.user);
-        req.isAdmin = isAdmin(result.user.id);
+        req.viaTelegram = true;
         return next();
       }
-      if (!config.allowDevAuth) {
-        return res.status(401).json({ error: 'unauthorized', reason: result.reason });
-      }
+      console.warn(`[auth] initData отклонено (${result.reason}) — продолжаем как гость`);
     }
-    if (config.allowDevAuth) {
-      // Режим разработки/превью: приложение открывается в обычном браузере.
-      const devId = Number(req.get('X-Dev-User') || 1);
-      req.user = upsertUser({ id: devId, first_name: 'Гость', username: 'preview' });
-      // в превью без настроенных админов гость видит и админ-панель (для проверки)
-      req.isAdmin = isAdmin(devId) || config.telegram.adminIds.length === 0;
-      req.devMode = true;
-      return next();
+
+    // 2) Обычный браузер — гостевой сеанс без авторизации.
+    //    Telegram ID всегда положительные, гости живут в отрицательном диапазоне.
+    let guestId = readGuestCookie(req);
+    if (!guestId || !getUser(guestId)) {
+      do {
+        guestId = -crypto.randomInt(1_000_000, 2_000_000_000);
+      } while (db.users[String(guestId)]);
+      res.cookie(GUEST_COOKIE, `${guestId}.${signGuestId(guestId)}`, {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        maxAge: GUEST_COOKIE_MAX_AGE,
+        secure: req.secure,
+      });
     }
-    return res.status(401).json({ error: 'unauthorized' });
+    req.user = upsertUser({ id: guestId, first_name: 'Гость', isGuest: true });
+    req.guest = true;
+    next();
   }
 
   const api = express.Router();
@@ -85,10 +121,9 @@ export function createServer() {
       payments: paymentMethods(),
       statuses: ORDER_STATUSES,
       user: req.user,
-      isAdmin: req.isAdmin,
-      devMode: Boolean(req.devMode),
+      guest: Boolean(req.guest),
       botUsername: config.telegram.username,
-      supportEnabled: config.telegram.hasBot || config.allowDevAuth,
+      supportEnabled: config.telegram.hasBot,
     });
   }));
 
@@ -173,7 +208,8 @@ export function createServer() {
     const payload = { order };
 
     if (method === 'yookassa') {
-      const returnUrl = config.telegram.username
+      // из Telegram возвращаем по deep-link в бота, из браузера — на сайт
+      const returnUrl = req.viaTelegram && config.telegram.username
         ? `https://t.me/${config.telegram.username}?startapp=order_${order.id}`
         : `${config.publicUrl || ''}/?order=${order.id}`;
       try {
@@ -247,177 +283,6 @@ export function createServer() {
     if (messages.length) markUserRead(req.user.id);
     res.json({ messages, now: Date.now() });
   }));
-
-  // ─── админ-панель (веб + бот используют одни и те же данные) ──
-  const admin = express.Router();
-  admin.use((req, res, next) => {
-    if (!req.isAdmin) return res.status(403).json({ error: 'Недостаточно прав' });
-    return next();
-  });
-
-  admin.get('/stats', wrap((req, res) => {
-    const s = orderStats();
-    const top = {};
-    for (const o of db.orders) {
-      if (o.paymentStatus !== 'paid') continue;
-      for (const it of o.items) top[it.name] = (top[it.name] || 0) + it.qty;
-    }
-    res.json({
-      orders: s,
-      catalog: catalogStats(),
-      support: supportStats(),
-      bestsellers: Object.entries(top).sort((a, b) => b[1] - a[1]).slice(0, 8)
-        .map(([name, qty]) => ({ name, qty })),
-    });
-  }));
-
-  // товары
-  admin.get('/products', wrap((req, res) => {
-    const q = String(req.query.q || '').trim().toLowerCase();
-    const filter = String(req.query.filter || 'all');
-    let list = allProducts();
-    if (filter === 'hidden') list = list.filter((p) => p.hidden);
-    else if (filter === 'oos') list = list.filter((p) => p.outOfStock);
-    else if (filter === 'custom') list = list.filter((p) => p.custom);
-    else if (filter === 'edited') list = list.filter((p) => p.price !== p.basePrice);
-    if (q) {
-      list = list.filter((p) =>
-        `${p.name} ${p.article} ${p.id} ${p.volumeLabel || ''}`.toLowerCase().includes(q));
-    }
-    res.json({ products: list, categories: getCategories() });
-  }));
-
-  admin.post('/products', wrap((req, res) => {
-    const body = req.body || {};
-    const product = createProduct(body);
-    if (body.photoData) {
-      const { buffer, ext } = parsePhotoDataUrl(body.photoData);
-      const image = saveProductPhoto(product.id, buffer, ext);
-      updateProduct(product.id, { image });
-    }
-    res.json({ product: findProduct(product.id) });
-  }));
-
-  admin.put('/products/:id', wrap((req, res) => {
-    const body = req.body || {};
-    let product = updateProduct(req.params.id, body);
-    if (body.photoData) {
-      const { buffer, ext } = parsePhotoDataUrl(body.photoData);
-      const image = saveProductPhoto(product.id, buffer, ext);
-      product = updateProduct(product.id, { image });
-    }
-    res.json({ product });
-  }));
-
-  admin.delete('/products/:id', wrap((req, res) => {
-    res.json(deleteProduct(req.params.id));
-  }));
-
-  admin.post('/products/:id/restore', wrap((req, res) => {
-    res.json({ product: restoreProduct(req.params.id) });
-  }));
-
-  // категории
-  admin.get('/categories', wrap((req, res) => {
-    const counts = {};
-    for (const p of allProducts()) counts[p.category] = (counts[p.category] || 0) + 1;
-    res.json({
-      categories: getCategories().map((c) => ({ ...c, products: counts[c.id] || 0 })),
-    });
-  }));
-
-  admin.post('/categories', wrap((req, res) => {
-    res.json({ category: createCategory(req.body || {}) });
-  }));
-
-  admin.put('/categories/:id', wrap((req, res) => {
-    res.json({ category: updateCategory(req.params.id, req.body || {}) });
-  }));
-
-  admin.delete('/categories/:id', wrap((req, res) => {
-    deleteCategory(req.params.id);
-    res.json({ ok: true });
-  }));
-
-  // информация о магазине: бренд, контакты, доставка, реквизиты, тексты
-  admin.get('/shop-info', wrap((req, res) => {
-    res.json(getShopInfo());
-  }));
-
-  admin.put('/shop-info', wrap((req, res) => {
-    res.json(updateShopInfo(req.body || {}));
-  }));
-
-  // заказы
-  admin.get('/orders', wrap((req, res) => {
-    const q = String(req.query.q || '').trim().toLowerCase();
-    const filter = String(req.query.filter || 'all');
-    let orders = db.orders;
-    if (filter === 'open') orders = orders.filter((o) => !['done', 'canceled'].includes(o.status));
-    else if (filter === 'paid') orders = orders.filter((o) => o.paymentStatus === 'paid');
-    else if (filter === 'invoice') orders = orders.filter((o) => o.paymentMethod === 'invoice');
-    if (q) {
-      orders = orders.filter((o) =>
-        `${o.number} ${o.id} ${o.customer?.name || ''} ${o.customer?.phone || ''} ${o.company?.name || ''} ${o.company?.inn || ''}`
-          .toLowerCase().includes(q));
-    }
-    res.json({
-      orders: orders.slice(0, 200).map((o) => ({
-        ...o,
-        userTitle: userTitle(o.userId),
-        username: getUser(o.userId)?.username || '',
-      })),
-      total: orders.length,
-    });
-  }));
-
-  admin.put('/orders/:id', wrap((req, res) => {
-    const order = getOrder(req.params.id);
-    if (!order) return res.status(404).json({ error: 'Заказ не найден' });
-    const status = String(req.body?.status || '');
-    if (!ORDER_STATUSES[status]) throw new Error('Неизвестный статус');
-    setStatus(order, status, `admin:${req.user.id}`);
-    res.json({ order });
-  }));
-
-  // поддержка
-  admin.get('/threads', wrap((req, res) => {
-    res.json({
-      threads: listThreads().map((t) => ({
-        userId: t.userId,
-        title: t.title,
-        username: getUser(t.userId)?.username || '',
-        unreadAdmin: t.unreadAdmin,
-        status: t.status,
-        updatedAt: t.updatedAt,
-        lastMessage: t.lastMessage,
-        messagesCount: t.messages.length,
-      })),
-    });
-  }));
-
-  admin.get('/threads/:userId', wrap((req, res) => {
-    const thread = getThread(req.params.userId, false);
-    if (!thread) return res.status(404).json({ error: 'Диалог не найден' });
-    markAdminRead(req.params.userId);
-    res.json({
-      thread: {
-        ...thread,
-        title: userTitle(req.params.userId),
-        username: getUser(req.params.userId)?.username || '',
-      },
-    });
-  }));
-
-  admin.post('/threads/:userId/reply', wrap((req, res) => {
-    const text = String(req.body?.text || '').trim();
-    if (!text) throw new Error('Пустое сообщение');
-    const name = [req.user.firstName, req.user.lastName].filter(Boolean).join(' ') || 'Поддержка';
-    const message = addAdminMessage(req.params.userId, text, { name });
-    res.json({ message });
-  }));
-
-  api.use('/admin', admin);
 
   app.use('/api', api);
 

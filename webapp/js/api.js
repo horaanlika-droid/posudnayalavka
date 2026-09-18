@@ -50,22 +50,4 @@ export const api = {
   support: () => request('/support'),
   sendSupport: (text, context) => request('/support', { method: 'POST', body: { text, context } }),
   supportUpdates: (since) => request('/support/updates', { query: { since } }),
-
-  // ── админ-панель ──
-  adminStats: () => request('/admin/stats'),
-  adminProducts: (q = '', filter = 'all') => request('/admin/products', { query: { q, filter } }),
-  adminCreateProduct: (payload) => request('/admin/products', { method: 'POST', body: payload }),
-  adminUpdateProduct: (id, payload) => request(`/admin/products/${id}`, { method: 'PUT', body: payload }),
-  adminDeleteProduct: (id) => request(`/admin/products/${id}`, { method: 'DELETE' }),
-  adminCategories: () => request('/admin/categories'),
-  adminCreateCategory: (payload) => request('/admin/categories', { method: 'POST', body: payload }),
-  adminUpdateCategory: (id, payload) => request(`/admin/categories/${id}`, { method: 'PUT', body: payload }),
-  adminDeleteCategory: (id) => request(`/admin/categories/${id}`, { method: 'DELETE' }),
-  adminShopInfo: () => request('/admin/shop-info'),
-  adminSaveShopInfo: (payload) => request('/admin/shop-info', { method: 'PUT', body: payload }),
-  adminOrders: (q = '', filter = 'all') => request('/admin/orders', { query: { q, filter } }),
-  adminSetOrderStatus: (id, status) => request(`/admin/orders/${id}`, { method: 'PUT', body: { status } }),
-  adminThreads: () => request('/admin/threads'),
-  adminThread: (userId) => request(`/admin/threads/${userId}`),
-  adminReply: (userId, text) => request(`/admin/threads/${userId}/reply`, { method: 'POST', body: { text } }),
 };

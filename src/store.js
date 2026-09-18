@@ -130,6 +130,7 @@ export function upsertUser(user) {
     username: user.username ?? prev.username ?? '',
     languageCode: user.language_code ?? prev.languageCode ?? '',
     isPremium: user.is_premium ?? prev.isPremium ?? false,
+    isGuest: Boolean(user.isGuest ?? prev.isGuest ?? false),
     photoUrl: user.photo_url ?? prev.photoUrl ?? '',
     lastSeen: Date.now(),
   };
@@ -144,6 +145,7 @@ export function getUser(id) {
 export function userTitle(id) {
   const u = getUser(id);
   if (!u) return `ID ${id}`;
+  if (u.isGuest) return 'Гость (сайт)';
   const name = [u.firstName, u.lastName].filter(Boolean).join(' ').trim();
   const uname = u.username ? ` @${u.username}` : '';
   return `${name || 'Без имени'}${uname}`;
