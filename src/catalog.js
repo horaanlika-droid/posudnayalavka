@@ -255,6 +255,67 @@ export function restoreProduct(id) {
   return findProduct(key);
 }
 
+// ─── восстановление каталога из прайса ────────────────────────
+
+/** Базовые позиции из прайса, помеченные админом как удалённые. */
+export function deletedBaseProducts() {
+  const set = new Set((db.deletedProducts || []).map(String));
+  return (base.products || []).filter((p) => set.has(String(p.id))).map(apply);
+}
+
+function deletedBaseIds() {
+  const known = new Set((base.products || []).map((p) => String(p.id)));
+  return (db.deletedProducts || []).map(String).filter((id) => known.has(id));
+}
+
+function hiddenBaseIds() {
+  return (base.products || [])
+    .map((p) => String(p.id))
+    .filter((id) => db.overrides[id]?.hidden === true);
+}
+
+/**
+ * Состояние каталога: сколько позиций в прайсе, сколько видно на витрине,
+ * сколько скрыто и удалено. `broken` — витрина пуста, хотя в прайсе позиции есть.
+ */
+export function catalogHealth() {
+  const baseTotal = (base.products || []).length;
+  const visible = publicProducts().length;
+  const deleted = deletedBaseIds().length;
+  const hidden = hiddenBaseIds().length;
+  return {
+    baseTotal,
+    visible,
+    deleted,
+    hidden,
+    custom: Object.keys(db.customProducts || {}).length,
+    broken: baseTotal > 0 && visible === 0,
+  };
+}
+
+/**
+ * Возвращает в каталог базовые позиции из прайса (`data/catalog.json`):
+ * снимает пометку «удалён» и, если нужно, ручное скрытие.
+ * Свои товары, цены, описания и фото не трогает.
+ */
+export function restoreBaseCatalog({ unhide = true } = {}) {
+  const restoredIds = deletedBaseIds();
+  const rest = (db.deletedProducts || []).filter((id) => !restoredIds.includes(String(id)));
+  db.deletedProducts = rest;
+
+  let unhidden = 0;
+  if (unhide) {
+    for (const id of hiddenBaseIds()) {
+      const patch = db.overrides[id];
+      delete patch.hidden;
+      unhidden += 1;
+      if (!Object.keys(patch).length) delete db.overrides[id];
+    }
+  }
+  save();
+  return { restored: restoredIds.length, restoredIds, unhidden, visible: publicProducts().length };
+}
+
 // ─── фото товаров ─────────────────────────────────────────────
 
 const DATA_URL_RE = /^data:(image\/(jpeg|png|webp));base64,(.+)$/;
@@ -485,11 +546,13 @@ export function catalogStats() {
   const products = allProducts();
   return {
     total: products.length,
+    baseTotal: (base.products || []).length,
+    visible: products.filter((p) => !p.hidden).length,
     hidden: products.filter((p) => p.hidden).length,
     outOfStock: products.filter((p) => p.outOfStock).length,
     edited: Object.keys(db.overrides).length,
     custom: Object.keys(db.customProducts || {}).length,
-    deleted: (db.deletedProducts || []).length,
+    deleted: deletedBaseIds().length,
     categories: getCategories().length,
   };
 }
