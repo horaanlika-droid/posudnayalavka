@@ -56,7 +56,7 @@ function applyChrome(entry) {
   else if (canGoBack) {
     left.append(tap(h('button.nav-btn', { html: `${icon('chevronLeft', 22)}<span>Назад</span>` }), () => back(), 'light'));
   } else if (entry.navLogo !== false) {
-    left.append(h('img.nav-logo', { src: 'assets/brand/logo.png', alt: 'Посудная лавка' }));
+    left.append(h('img.nav-logo', { src: 'assets/brand/logo.svg', alt: 'Посудная лавка' }));
   }
 
   const title = h('.nav-title', entry.title || '');

@@ -95,7 +95,7 @@ export default function profileView() {
     )),
 
     h('.brand-footer',
-      h('img', { src: 'assets/brand/logo.png', alt: '' }),
+      h('img', { src: 'assets/brand/logo.svg', alt: '' }),
       h('p', texts.footerNote || ''),
       h('p', brand.email || '')),
   );
