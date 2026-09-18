@@ -35,7 +35,7 @@ function hero() {
   const box = h('.hero',
     h('.hero-slides', ...slides),
     h('.hero-content',
-      h('.hero-brand-badge', h('img', { src: 'assets/brand/logo.png', alt: 'Посудная лавка' })),
+      h('.hero-brand-badge', h('img', { src: 'assets/brand/logo.svg', alt: 'Посудная лавка' })),
       titleEl,
       subEl,
       tap(h('button.hero-cta', h('span', 'Перейти в каталог'), h('span', { html: icon('chevron', 16) })),
@@ -57,7 +57,7 @@ function hero() {
 
 function brandStrip() {
   return h('.brand-strip',
-    h('.brand-strip-logo-wrap', h('img.brand-strip-logo', { src: 'assets/brand/logo.png', alt: 'Посудная лавка' })),
+    h('.brand-strip-logo-wrap', h('img.brand-strip-logo', { src: 'assets/brand/logo.svg', alt: 'Посудная лавка' })),
     h('.brand-strip-body',
       h('.brand-strip-chips',
         h('.brand-chip', `${state.products.length} позиций`),
@@ -113,7 +113,7 @@ export default function homeView() {
             state.config?.delivery?.note || '')))),
 
     h('.brand-footer',
-      h('img', { src: 'assets/brand/logo.png', alt: 'Посудная лавка' }),
+      h('img', { src: 'assets/brand/logo.svg', alt: 'Посудная лавка' }),
       h('p.brand-footer-title', state.config?.brand?.title || 'Посудная лавка'),
       h('p', `${state.products.length} позиций в каталоге · ${state.config?.texts?.footerNote || ''}`),
       h('p', state.config?.brand?.email || '')),

@@ -33,7 +33,7 @@ function splash(message, retry = false) {
   host.innerHTML = '';
   host.append(h('.screen',
     h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '80%', gap: '18px', padding: '0 32px', textAlign: 'center' } },
-      h('img', { src: 'assets/brand/logo.png', style: { height: '54px', opacity: '0.85' } }),
+      h('img', { src: 'assets/brand/logo.svg', style: { height: '54px', opacity: '0.85' } }),
       retry ? null : h('.spinner'),
       h('.tiny.muted', message),
       retry ? h('button.btn', { style: { width: 'auto', padding: '0 22px' }, onclick: () => location.reload() }, 'Повторить') : null)));
