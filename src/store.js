@@ -11,15 +11,28 @@ const DATA_DIR = path.join(ROOT, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
 const EMPTY = {
-  version: 1,
+  version: 2,
   users: {},        // id -> профиль
   orders: [],       // заказы
   threads: {},      // userId -> { messages: [], unreadAdmin, unreadUser, status }
-  overrides: {},    // productId -> { price, hidden, outOfStock }
+  overrides: {},    // productId -> { price, hidden, outOfStock, ...любые поля товара }
   favorites: {},    // userId -> [productId]
   carts: {},        // userId -> [{ id, qty }]
   counters: { order: 1000, invoice: 0 },
   settings: {},
+  // ─── управляемый через админку контент ──────────────────────
+  customProducts: {},   // id -> полный объект товара, добавленного админом
+  customCategories: [], // [{ id, title, subtitle, emoji }]
+  categoryOverrides: {},// baseCategoryId -> patch { title, subtitle, emoji }
+  deletedProducts: [],  // id базовых товаров из catalog.json, удалённых админом
+  deletedCategories: [],// id базовых категорий, удалённых админом
+  shopInfo: {           // правки поверх catalog.json и переменных окружения
+    brand: {},          // { name, title, tagline, instagram, telegram, email, managers[] }
+    delivery: {},       // { note, freeFromRub, freeCities[] }
+    shop: {},           // { freeShippingFrom, shippingCost, minOrderTotal }
+    seller: {},         // реквизиты для счетов (перекрывают SELLER_*)
+    texts: {},          // { welcome, delivery, about, footerNote }
+  },
 };
 
 function ensureDir() {
@@ -31,7 +44,19 @@ function read() {
   if (!fs.existsSync(DB_FILE)) return structuredClone(EMPTY);
   try {
     const parsed = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-    return { ...structuredClone(EMPTY), ...parsed };
+    const merged = { ...structuredClone(EMPTY), ...parsed };
+    // глубокая склейка вложенных объектов, чтобы старые db.json не ломались
+    merged.counters = { ...EMPTY.counters, ...(parsed.counters || {}) };
+    merged.settings = parsed.settings || {};
+    merged.shopInfo = {
+      ...structuredClone(EMPTY.shopInfo),
+      ...(parsed.shopInfo || {}),
+    };
+    if (!Array.isArray(merged.customCategories)) merged.customCategories = [];
+    if (!Array.isArray(merged.deletedProducts)) merged.deletedProducts = [];
+    if (!Array.isArray(merged.deletedCategories)) merged.deletedCategories = [];
+    merged.version = EMPTY.version;
+    return merged;
   } catch (err) {
     console.error('[store] повреждён db.json, создаю новый:', err.message);
     try {

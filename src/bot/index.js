@@ -8,7 +8,7 @@ import { db, save, upsertUser, userTitle } from '../store.js';
 import { events } from '../events.js';
 import { addUserMessage, addAdminMessage, getThread } from '../support.js';
 import { userOrders } from '../orders.js';
-import { brand, categories, publicProducts, findProduct } from '../catalog.js';
+import { getCategories, publicProducts, findProduct, getTexts } from '../catalog.js';
 import { invoiceSummary } from '../payments/invoice.js';
 import { registerAdmin, statusMessage, adminPending } from './admin.js';
 import { esc, money, orderCard, statusLabel, dateTime } from './format.js';
@@ -49,7 +49,7 @@ function catalogMenuKeyboard(active = 'all') {
   const kb = new InlineKeyboard();
   const allCount = publicCatalog().length;
   kb.text(active === 'all' ? `• Все (${allCount})` : `Все (${allCount})`, 'u:cat:all:0').row();
-  for (const category of categories) {
+  for (const category of getCategories()) {
     const count = categoryProducts(category.id).length;
     kb.text(active === category.id ? `• ${category.title} (${count})` : `${category.title} (${count})`, `u:cat:${category.id}:0`).row();
   }
@@ -62,7 +62,7 @@ function catalogMenuKeyboard(active = 'all') {
 function catalogText(active = 'all') {
   const title = active === 'all'
     ? 'Весь каталог'
-    : categories.find((c) => c.id === active)?.title || 'Каталог';
+    : getCategories().find((c) => c.id === active)?.title || 'Каталог';
   const items = categoryProducts(active);
   return [
     `<b>${esc(title)}</b>`,
@@ -96,7 +96,7 @@ function catalogPage(categoryId = 'all', page = 0) {
 
   const categoryTitle = categoryId === 'all'
     ? 'Каталог'
-    : categories.find((c) => c.id === categoryId)?.title || 'Каталог';
+    : getCategories().find((c) => c.id === categoryId)?.title || 'Каталог';
   const from = items.length ? (currentPage * CATALOG_PAGE + 1) : 0;
   const to = Math.min(items.length, currentPage * CATALOG_PAGE + slice.length);
   const text = [
@@ -110,7 +110,7 @@ function catalogPage(categoryId = 'all', page = 0) {
 }
 
 function productCardText(product) {
-  const category = categories.find((c) => c.id === product.category);
+  const category = getCategories().find((c) => c.id === product.category);
   return [
     `<b>${esc(product.name)}</b>`,
     `Артикул: <code>${esc(product.article)}</code>${category ? ` · ${esc(category.title)}` : ''}`,
@@ -160,30 +160,14 @@ async function notifyUser(userId, text, keyboard) {
   }
 }
 
-const WELCOME = (name) => [
-  `${name ? `${esc(name)}, п` : 'П'}риветствуем в «Посудной лавке» 🥃`,
-  '',
-  'Барное стекло по прямым контрактам с производствами: хайболы, олд фешн,',
-  'коктейльные и винные бокалы, графины и чайная коллекция.',
-  '',
-  '• Каталог с актуальными ценами и наличием',
-  '• Оплата картой или счёт для юрлица',
-  '• Доставка по России и миру, по Москве и Санкт-Петербургу — бесплатно',
-  '',
-  'Можно открыть Mini App или листать каталог прямо в чате.',
-].join('\n');
+/** Тексты берутся из настроек магазина — правятся в админке (бот и Mini App). */
+function welcomeText(name) {
+  const tpl = getTexts().welcome || '';
+  if (name) return tpl.replaceAll('{name}', esc(name));
+  return tpl.replace('{name}, ', '').replace('{name} ,', '').replaceAll('{name}', '').trim();
+}
 
-const DELIVERY_TEXT = [
-  '<b>Доставка и оплата</b>',
-  '',
-  'Собираем и отгружаем заказ за 1–2 рабочих дня после оплаты.',
-  '',
-  '• Москва и Санкт-Петербург — бесплатно',
-  '• По России — бесплатно от 30 000 ₽ (СДЭК или ПЭК)',
-  '• Казахстан, Беларусь, Армения, Узбекистан и другие страны — рассчитываем индивидуально',
-  '',
-  '<b>Оплата:</b> картой онлайн через ЮKassa или по счёту для юридических лиц с закрывающими документами.',
-].join('\n');
+const deliveryText = () => getTexts().delivery || '';
 
 export function createBot() {
   if (!config.telegram.token) {
@@ -208,7 +192,7 @@ export function createBot() {
 
   // ─── клиентские команды ───────────────────────────────────────
   bot.command('start', async (ctx) => {
-    await ctx.reply(WELCOME(ctx.from.first_name), { parse_mode: 'HTML', reply_markup: shopKeyboard() });
+    await ctx.reply(welcomeText(ctx.from.first_name), { parse_mode: 'HTML', reply_markup: shopKeyboard() });
     if (isAdmin(ctx.from.id)) {
       await ctx.reply('Вы вошли как администратор. Панель управления — /admin', {
         reply_markup: new InlineKeyboard().text('⚙️ Открыть панель', 'a:menu'),
@@ -238,7 +222,7 @@ export function createBot() {
   });
 
   bot.command('delivery', async (ctx) => {
-    await ctx.reply(DELIVERY_TEXT, { parse_mode: 'HTML', reply_markup: shopKeyboard() });
+    await ctx.reply(deliveryText(), { parse_mode: 'HTML', reply_markup: shopKeyboard() });
   });
 
   bot.command('support', async (ctx) => {
@@ -261,7 +245,7 @@ export function createBot() {
 
   bot.callbackQuery('u:delivery', async (ctx) => {
     await ctx.answerCallbackQuery();
-    await ctx.reply(DELIVERY_TEXT, { parse_mode: 'HTML' });
+    await ctx.reply(deliveryText(), { parse_mode: 'HTML' });
   });
 
   bot.callbackQuery(/^u:catalog(?::(.+))?$/, async (ctx) => {
@@ -329,7 +313,6 @@ export function createBot() {
       const target = replyTo ? map[`${ctx.chat.id}:${replyTo}`] : null;
       if (target) {
         addAdminMessage(target, text, { name: ctx.from.first_name });
-        await notifyUser(target, `🛎 <b>Поддержка</b>\n\n${esc(text)}`);
         return ctx.reply(`✅ Отправлено: ${esc(userTitle(target))}`, { parse_mode: 'HTML' });
       }
       if (await admin.handleAdminText(ctx)) return;
@@ -342,6 +325,15 @@ export function createBot() {
     await ctx.reply('Приняли! Менеджер ответит здесь и в чате поддержки внутри приложения.', {
       reply_markup: shopKeyboard(),
     });
+  });
+
+  // фото от админа — замена фото товара или шаг мастера создания
+  bot.on(':photo', async (ctx, next) => {
+    if (isAdmin(ctx.from?.id)) {
+      await admin.handleAdminPhoto(ctx).catch((err) => ctx.reply(`❌ ${err.message}`).catch(() => {}));
+      return;
+    }
+    return next();
   });
 
   bot.on('message', async (ctx) => {
@@ -379,6 +371,16 @@ export function createBot() {
       new InlineKeyboard().text('📦 Открыть заказ', `a:order:${order.id}`),
     );
     await notifyUser(order.userId, statusMessage(order));
+  });
+
+  // смена статуса из любой админки (бот или Mini App) — уведомляем клиента
+  events.on('order:status', async (order) => {
+    await notifyUser(order.userId, statusMessage(order));
+  });
+
+  // ответ поддержки из любой админки — дублируем клиенту в личку бота
+  events.on('support:admin-message', async ({ userId, message }) => {
+    await notifyUser(userId, `🛎 <b>Поддержка</b>\n\n${esc(message.text)}`);
   });
 
   events.on('support:user-message', async ({ userId, message }) => {

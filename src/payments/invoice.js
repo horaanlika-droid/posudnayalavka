@@ -1,9 +1,10 @@
 /**
  * Счёт для юридических лиц: номер, суммы, HTML-версия для печати/сохранения в PDF.
- * Реквизиты продавца подставляются из переменных окружения (SELLER_*).
+ * Реквизиты продавца: переменные окружения (SELLER_*) + правки из админки.
  */
 import { config } from '../config.js';
 import { db, save } from '../store.js';
+import { getSeller } from '../catalog.js';
 
 const MONTHS = [
   'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
@@ -14,7 +15,8 @@ export function nextInvoiceNumber() {
   db.counters.invoice = (db.counters.invoice || 0) + 1;
   save();
   const year = new Date().getFullYear();
-  return `${config.seller.invoicePrefix}${year}-${String(db.counters.invoice).padStart(4, '0')}`;
+  const prefix = getSeller().invoicePrefix || 'ПЛ-';
+  return `${prefix}${year}-${String(db.counters.invoice).padStart(4, '0')}`;
 }
 
 export function formatDateRu(ts) {
@@ -25,7 +27,7 @@ export function formatDateRu(ts) {
 const money = (v) => new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
 
 function vatInfo(total) {
-  const mode = config.seller.vat;
+  const mode = getSeller().vat;
   if (mode === '20') return { label: 'В том числе НДС 20%', value: money((total / 120) * 20) };
   if (mode === '10') return { label: 'В том числе НДС 10%', value: money((total / 110) * 10) };
   return { label: 'НДС', value: 'не облагается' };
@@ -81,7 +83,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 
 /** HTML-версия счёта (A4, печатается в PDF средствами браузера). */
 export function renderInvoiceHtml(order) {
-  const s = config.seller;
+  const s = getSeller();
   const c = order.company || {};
   const vat = vatInfo(order.total);
   const rows = order.items
@@ -175,7 +177,7 @@ export function renderInvoiceHtml(order) {
 
   <div class="totals">
     Итого: <b>${money(order.total)} ₽</b><br>
-    <span class="muted">${vat.label}: ${vat.value}${config.seller.vat === 'none' ? '' : ' ₽'}</span>
+    <span class="muted">${vat.label}: ${vat.value}${s.vat === 'none' ? '' : ' ₽'}</span>
   </div>
 
   <p style="margin-top:16px">
@@ -198,19 +200,20 @@ export function renderInvoiceHtml(order) {
 
 /** Краткая сводка по счёту для API/бота. */
 export function invoiceSummary(order) {
+  const s = getSeller();
   return {
     number: order.invoiceNumber,
     total: order.total,
     inWords: amountInWords(order.total),
     seller: {
-      legalName: config.seller.legalName || config.seller.name,
-      inn: config.seller.inn,
-      kpp: config.seller.kpp,
-      account: config.seller.account,
-      bankName: config.seller.bankName,
-      bik: config.seller.bik,
-      corrAccount: config.seller.corrAccount,
-      configured: config.seller.configured,
+      legalName: s.legalName || s.name,
+      inn: s.inn,
+      kpp: s.kpp,
+      account: s.account,
+      bankName: s.bankName,
+      bik: s.bik,
+      corrAccount: s.corrAccount,
+      configured: s.configured,
     },
     url: `${config.publicUrl || ''}/invoice/${order.id}?k=${order.invoiceKey}`,
   };

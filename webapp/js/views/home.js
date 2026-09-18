@@ -104,9 +104,7 @@ export default function homeView() {
       h('.group',
         h('.cell', { style: { display: 'block', padding: '14px' } },
           h('div', { style: { fontSize: '15px', lineHeight: '1.45', color: 'var(--label-2)' } },
-            '«Посудная лавка» появилась из понимания, что в барной индустрии не бывает мелочей. ',
-            'Каждый бокал — продолжение напитка и часть впечатления гостя. Мы лично отбираем стекло ',
-            'по прямым контрактам на трёх производствах.')))),
+            String(state.config?.texts?.about || '').split(/\n\n+/)[0] || '')))),
 
     section('Доставка',
       h('.group',
@@ -117,7 +115,7 @@ export default function homeView() {
     h('.brand-footer',
       h('img', { src: 'assets/brand/logo.png', alt: 'Посудная лавка' }),
       h('p.brand-footer-title', state.config?.brand?.title || 'Посудная лавка'),
-      h('p', `${state.products.length} позиций в каталоге · цены августа 2026`),
+      h('p', `${state.products.length} позиций в каталоге · ${state.config?.texts?.footerNote || ''}`),
       h('p', state.config?.brand?.email || '')),
   );
 

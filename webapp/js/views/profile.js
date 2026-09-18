@@ -24,7 +24,16 @@ export default function profileView() {
     spentEl.textContent = money(paid);
   }).catch(() => {});
 
+  const texts = state.config?.texts || {};
+  const aboutParagraphs = String(texts.about || '').split(/\n\n+/).filter(Boolean);
+  const freeCities = (state.config?.delivery?.freeCities || []).join(' и ') || 'Москва и Санкт-Петербург';
+
   const content = h('div',
+    state.config?.isAdmin
+      ? section('Управление', group(
+        cell({ title: 'Админ-панель', sub: 'Товары, заказы, контакты', iconName: 'gear', chevron: true, onClick: () => navigate('admin') }),
+      ))
+      : null,
     h('.profile-head',
       h('.avatar', user.photoUrl ? h('img', { src: user.photoUrl, alt: '' }) : initials),
       h('div',
@@ -49,7 +58,7 @@ export default function profileView() {
         onClick: () => infoSheet('Доставка и оплата', [
           h('p.muted', { style: { fontSize: '15px', lineHeight: '1.5' } }, state.config?.delivery?.note || ''),
           group(
-            cell({ title: 'Москва и Санкт-Петербург', value: 'бесплатно' }),
+            cell({ title: freeCities, value: 'бесплатно' }),
             cell({ title: 'По России', value: `от ${money(state.config?.delivery?.freeFrom || 30000)} бесплатно` }),
             cell({ title: 'Мир', value: 'индивидуально' }),
           ),
@@ -63,13 +72,8 @@ export default function profileView() {
       cell({
         title: 'О бренде', iconName: 'info', chevron: true,
         onClick: () => infoSheet('О бренде', [
-          h('p.muted', { style: { fontSize: '15px', lineHeight: '1.5' } },
-            '«Посудная лавка» появилась из понимания, что в барной индустрии не бывает мелочей. Каждый бокал — ' +
-            'продолжение напитка и часть впечатления гостя. Мы лично отбираем стекло по прямым контрактам ' +
-            'на трёх производствах в Китае, чтобы предложить барам и ресторанам посуду, сочетающую эстетику и функциональность.'),
-          h('p.muted', { style: { fontSize: '15px', lineHeight: '1.5' } },
-            'Роман Сабанаев, сооснователь. В индустрии гостеприимства 16 лет, более 20 проектов с нуля, ' +
-            'основатель «Pop-up Bar», в прошлом бренд-бар-менеджер El Copitas Bar, Tagliatella Caffe, Paloma Cantina, Sangre Fresca и Nola Jazz Bar.'),
+          ...aboutParagraphs.map((par) =>
+            h('p.muted', { style: { fontSize: '15px', lineHeight: '1.5' } }, par)),
           group(...(brand.managers || []).map((m) =>
             cell({
               title: m.region, sub: `${m.phone} · @${m.telegram}`, iconName: 'phone', chevron: true,
@@ -100,7 +104,7 @@ export default function profileView() {
 
     h('.brand-footer',
       h('img', { src: 'assets/brand/logo.png', alt: '' }),
-      h('p', 'Прайс август 2026 · цены указаны за штуку'),
+      h('p', texts.footerNote || ''),
       h('p', brand.email || '')),
   );
 

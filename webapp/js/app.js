@@ -15,6 +15,14 @@ import favoritesView from './views/favorites.js';
 import searchView from './views/search.js';
 import supportView from './views/support.js';
 import profileView from './views/profile.js';
+import adminView from './views/admin.js';
+import adminProductsView from './views/admin-products.js';
+import adminProductView from './views/admin-product.js';
+import adminCatsView from './views/admin-cats.js';
+import adminInfoView from './views/admin-info.js';
+import adminOrdersView from './views/admin-orders.js';
+import adminSupportView from './views/admin-support.js';
+import adminThreadView from './views/admin-thread.js';
 
 register('home', homeView);
 register('catalog', catalogView);
@@ -27,6 +35,14 @@ register('favorites', favoritesView);
 register('search', searchView);
 register('support', supportView);
 register('profile', profileView);
+register('admin', adminView);
+register('admin-products', adminProductsView);
+register('admin-product', adminProductView);
+register('admin-cats', adminCatsView);
+register('admin-info', adminInfoView);
+register('admin-orders', adminOrdersView);
+register('admin-support', adminSupportView);
+register('admin-thread', adminThreadView);
 
 function splash(message, retry = false) {
   const host = document.getElementById('screens');

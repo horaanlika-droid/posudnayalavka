@@ -11,6 +11,8 @@ export function productCard(p, { fixedWidth = false } = {}) {
     img.addEventListener('load', () => img.classList.add('loaded'));
     if (img.complete) img.classList.add('loaded');
     media.append(img);
+  } else {
+    media.append(h('.pcard-noimg', '🍸'));
   }
   if (p.outOfStock) media.append(h('.badge.oos', 'Нет в наличии'));
   else if (p.isNew) media.append(h('.badge.new', 'Новинка'));
