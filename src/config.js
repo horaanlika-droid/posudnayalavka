@@ -65,11 +65,6 @@ export const config = {
     webhookSecret: str('TELEGRAM_WEBHOOK_SECRET'),
   },
 
-  // Вход без Telegram: явным флагом или автоматически, если бот не настроен
-  // (нужно, чтобы приложение открывалось в обычном браузере при разработке).
-  allowDevAuth: bool('ALLOW_DEV_AUTH', !botToken),
-
-
   yookassa: {
     shopId: str('YOOKASSA_SHOP_ID'),
     secretKey: str('YOOKASSA_SECRET_KEY'),

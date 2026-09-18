@@ -4,7 +4,7 @@
  */
 import { Bot, InlineKeyboard, GrammyError, HttpError } from 'grammy';
 import { config, isAdmin } from '../config.js';
-import { db, save, upsertUser, userTitle } from '../store.js';
+import { db, save, upsertUser, getUser, userTitle } from '../store.js';
 import { events } from '../events.js';
 import { addUserMessage, addAdminMessage, getThread } from '../support.js';
 import { userOrders } from '../orders.js';
@@ -147,6 +147,8 @@ async function notifyAdmins(text, keyboard) {
 
 async function notifyUser(userId, text, keyboard) {
   if (!bot) return false;
+  // гостям из браузера в личку не доставить — ответ придёт в приложение
+  if (getUser(userId)?.isGuest) return false;
   try {
     await bot.api.sendMessage(userId, text, {
       parse_mode: 'HTML',
