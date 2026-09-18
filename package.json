@@ -9,11 +9,13 @@
   },
   "main": "src/index.js",
   "scripts": {
+    "prestart": "node scripts/ensure_catalog.mjs",
     "start": "node src/index.js",
-    "web": "MODE=web node src/index.js",
-    "bot": "MODE=bot node src/index.js",
+    "web": "node scripts/ensure_catalog.mjs && MODE=web node src/index.js",
+    "bot": "node scripts/ensure_catalog.mjs && MODE=bot node src/index.js",
     "catalog": "python3 scripts/build_catalog.py",
-    "restore": "node scripts/restore_catalog.mjs"
+    "restore": "node scripts/restore_catalog.mjs",
+    "ensure": "node scripts/ensure_catalog.mjs"
   },
   "dependencies": {
     "express": "^4.19.2",

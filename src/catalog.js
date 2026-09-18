@@ -12,14 +12,80 @@ import { ROOT, config } from './config.js';
 import { db, save } from './store.js';
 
 const FILE = path.join(ROOT, 'data', 'catalog.json');
+const BUNDLE_FILE = path.join(ROOT, 'src', 'catalog.bundle.json');
+const FALLBACK_FILES = [
+  FILE,
+  BUNDLE_FILE,
+  path.join(ROOT, 'data', 'catalog.json.bundled'),
+  path.join(ROOT, 'webapp', 'assets', 'catalog.json'),
+];
 export const PRODUCTS_DIR = path.join(ROOT, 'webapp', 'assets', 'products');
 
+function ensureDataDir() {
+  try {
+    const dir = path.dirname(FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  } catch {}
+}
+
+function tryLoad(filePath) {
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.products)) throw new Error('неверный формат каталога');
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 let base = { brand: {}, categories: [], products: [], delivery: {} };
-try {
-  base = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-  console.log(`[catalog] загружено ${base.products?.length || 0} товаров из data/catalog.json`);
-} catch (err) {
-  console.error('[catalog] не удалось прочитать data/catalog.json:', err.message);
+let loadedFrom = null;
+for (const candidate of FALLBACK_FILES) {
+  const data = tryLoad(candidate);
+  if (data) {
+    base = data;
+    loadedFrom = candidate;
+    break;
+  }
+}
+
+if (base.products?.length) {
+  const rel = path.relative(ROOT, loadedFrom || FILE);
+  console.log(`[catalog] загружено ${base.products.length} товаров из ${rel}`);
+  // самовосстановление: если основной файл отсутствует или пуст, копируем туда бандл
+  if (loadedFrom && loadedFrom !== FILE) {
+    try {
+      ensureDataDir();
+      if (!fs.existsSync(FILE) || tryLoad(FILE) === null) {
+        fs.writeFileSync(FILE, JSON.stringify(base, null, 1));
+        console.log(`[catalog] восстановлен ${path.relative(ROOT, FILE)} из ${rel}`);
+      }
+    } catch (err) {
+      console.warn(`[catalog] не удалось восстановить ${FILE}:`, err.message);
+    }
+  }
+} else {
+  console.error('[catalog] не удалось прочитать data/catalog.json: ENOENT — пробовал:', FALLBACK_FILES.map((p) => path.relative(ROOT, p)).join(', '));
+  // последняя попытка — встроенный бандл уже проверен, но если его нет — логируем инструкцию
+  console.error('[catalog] в data/catalog.json нет товаров — витрина будет пустой. Пересоберите прайс: npm run catalog');
+}
+
+/** Принудительно пересоздать data/catalog.json из бандла (для healEmptyCatalog и админки). */
+export function ensureCatalogFile() {
+  if (fs.existsSync(FILE) && tryLoad(FILE)?.products?.length) return true;
+  const bundle = tryLoad(BUNDLE_FILE);
+  if (!bundle?.products?.length) return false;
+  try {
+    ensureDataDir();
+    fs.writeFileSync(FILE, JSON.stringify(bundle, null, 1));
+    base = bundle;
+    console.log(`[catalog] восстановлен из бандла: ${bundle.products.length} позиций`);
+    return true;
+  } catch (err) {
+    console.error('[catalog] ошибка восстановления из бандла:', err.message);
+    return false;
+  }
 }
 
 /** Базовые (из прайса) значения — для витрины используйте get* функции ниже. */

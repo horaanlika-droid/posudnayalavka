@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const DB_FILE = path.join(ROOT, 'data', 'db.json');
 const CATALOG_FILE = path.join(ROOT, 'data', 'catalog.json');
+const BUNDLE_FILE = path.join(ROOT, 'src', 'catalog.bundle.json');
 const BACKUP_DIR = path.join(ROOT, 'data', 'backups');
 
 const args = new Set(process.argv.slice(2));
@@ -32,10 +33,32 @@ function readJson(file, fallback) {
   }
 }
 
-const catalog = readJson(CATALOG_FILE, null);
-if (!catalog || !Array.isArray(catalog.products)) {
-  console.error('❌ Не читается data/catalog.json — пересоберите прайс: npm run catalog');
+function loadCatalog() {
+  for (const f of [CATALOG_FILE, BUNDLE_FILE]) {
+    const c = readJson(f, null);
+    if (c && Array.isArray(c.products) && c.products.length) {
+      if (f !== CATALOG_FILE) console.log(`ℹ️ Использую бандл ${path.relative(ROOT, f)} (${c.products.length} поз.) — основной ${path.relative(ROOT, CATALOG_FILE)} отсутствует`);
+      return c;
+    }
+  }
+  return null;
+}
+
+const catalog = loadCatalog();
+if (!catalog) {
+  console.error('❌ Не читается data/catalog.json и src/catalog.bundle.json — пересоберите прайс: npm run catalog');
   process.exit(1);
+}
+
+// если основного файла нет, но есть бандл — восстановим его для будущих запусков
+if (!fs.existsSync(CATALOG_FILE)) {
+  try {
+    fs.mkdirSync(path.dirname(CATALOG_FILE), { recursive: true });
+    fs.writeFileSync(CATALOG_FILE, JSON.stringify(catalog, null, 1));
+    console.log(`✅ Восстановлен ${path.relative(ROOT, CATALOG_FILE)} из бандла`);
+  } catch (err) {
+    console.warn(`⚠️ Не удалось восстановить ${CATALOG_FILE}: ${err.message}`);
+  }
 }
 
 const baseIds = new Set(catalog.products.map((p) => String(p.id)));

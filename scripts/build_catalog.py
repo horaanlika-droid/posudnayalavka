@@ -216,8 +216,17 @@ def main():
         "products": products,
         "source": os.path.basename(PDF),
     }
-    with open(os.path.join(DATA_DIR, "catalog.json"), "w", encoding="utf-8") as f:
+    data_path = os.path.join(DATA_DIR, "catalog.json")
+    with open(data_path, "w", encoding="utf-8") as f:
         json.dump(catalog, f, ensure_ascii=False, indent=1)
+    # дублируем в src как встроенный бандл — защита от пустого volume на /app/data
+    bundle_path = os.path.join(ROOT, "src", "catalog.bundle.json")
+    try:
+        with open(bundle_path, "w", encoding="utf-8") as bf:
+            json.dump(catalog, bf, ensure_ascii=False, indent=1)
+        print(f"бандл: {os.path.relpath(bundle_path, ROOT)}")
+    except Exception as e:
+        print(f"не удалось записать бандл {bundle_path}: {e}")
     print(f"товаров: {len(products)}, фото: {len(os.listdir(IMG_DIR))}")
 
 

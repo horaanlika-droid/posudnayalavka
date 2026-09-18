@@ -3,19 +3,31 @@
  * один процесс на BotHost: веб-приложение + бот).
  */
 import { config } from './config.js';
-import { catalogHealth, restoreBaseCatalog } from './catalog.js';
+import { catalogHealth, restoreBaseCatalog, ensureCatalogFile } from './catalog.js';
 import { startServer } from './server.js';
 import { startBot } from './bot/index.js';
 
 const mode = config.mode;
 
 /**
- * Страховка от «пустой витрины»: если в прайсе (data/catalog.json) позиции есть,
- * а на витрине не видно ни одной — значит товары пометили удалёнными/скрытыми
- * (например, случайно или старой версией админки). Возвращаем их из прайса.
+ * Страховка от «пустой витрины»:
+ * 1. Если data/catalog.json отсутствует (типично при монтировании volume на /app/data) —
+ *    восстанавливаем его из встроенного бандла src/catalog.bundle.json.
+ * 2. Если в прайсе позиции есть, а на витрине ни одной — значит товары пометили
+ *    удалёнными/скрытыми, возвращаем их.
  */
 function healEmptyCatalog() {
-  const health = catalogHealth();
+  let health = catalogHealth();
+
+  if (!health.baseTotal) {
+    console.warn('[catalog] data/catalog.json пуст или отсутствует — пробую восстановить из бандла…');
+    const ok = ensureCatalogFile();
+    if (ok) {
+      health = catalogHealth();
+      console.log(`[catalog] восстановлено из бандла: ${health.baseTotal} поз., видно ${health.visible}`);
+    }
+  }
+
   if (!health.baseTotal) {
     console.error('[catalog] в data/catalog.json нет товаров — витрина будет пустой. Пересоберите прайс: npm run catalog');
     return;
@@ -23,6 +35,14 @@ function healEmptyCatalog() {
   if (!health.broken) {
     if (health.deleted) {
       console.warn(`[catalog] удалено из каталога: ${health.deleted} поз. — вернуть: /admin → Каталог → «Вернуть всё из прайса»`);
+    }
+    if (health.visible === 0 && health.baseTotal > 0) {
+      // на случай если всё скрыто
+      const res = restoreBaseCatalog();
+      console.warn(
+        `[catalog] витрина была пустой — вернул из прайса ${res.restored} поз.` +
+        `${res.unhidden ? `, снял скрытие с ${res.unhidden}` : ''}; сейчас видно ${res.visible}`,
+      );
     }
     return;
   }
